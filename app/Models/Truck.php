@@ -70,6 +70,14 @@ class Truck extends Model
     }
 
     /**
+     * Get all pretrips for this truck
+     */
+    public function pretrips(): HasMany
+    {
+        return $this->hasMany(Pretrip::class);
+    }
+
+    /**
      * Scope untuk filter berdasarkan status
      */
     public function scopeAvailable($query)

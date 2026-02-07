@@ -1,0 +1,309 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\CompletePretripRequest;
+use App\Http\Requests\Api\StartPretripRequest;
+use App\Http\Requests\Api\TapPointRequest;
+use App\Http\Resources\PretripApiResource;
+use App\Models\Pretrip;
+use App\Models\PretripTap;
+use App\Models\RfidPoint;
+use App\Models\Truck;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+
+class PretripController extends Controller
+{
+    /**
+     * Get truck dengan RFID points
+     * GET /api/trucks/{truck_id}/rfid-points
+     */
+    public function getTruckRfidPoints($truckId): JsonResponse
+    {
+        $truck = Truck::with('activeRfidPoints')->findOrFail($truckId);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'truck_id' => $truck->truck_id,
+                'capacity' => $truck->capacity,
+                'required_points' => $truck->getRequiredPointsCount(),
+                'rfid_points' => $truck->activeRfidPoints->map(function ($point) {
+                    return [
+                        'id' => $point->id,
+                        'rfid_code' => $point->rfid_code,
+                        'location' => $point->location,
+                        'point_number' => $point->point_number,
+                    ];
+                }),
+            ],
+        ]);
+    }
+
+    /**
+     * Mulai pretrip baru (create header)
+     * POST /api/pretrips/start
+     */
+    public function startPretrip(StartPretripRequest $request): JsonResponse
+    {
+        $pretrip = Pretrip::create([
+            'truck_id' => $request->truck_id,
+            'driver_id' => $request->driver_id,
+            'trip_date' => $request->trip_date ?? today(),
+            'start_time' => now(),
+            'status' => 'in_progress',
+            'notes' => $request->notes,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'PreTrip started successfully',
+            'data' => new PretripApiResource($pretrip),
+        ], 201);
+    }
+
+    /**
+     * Tap satu titik (create detail tap)
+     * POST /api/pretrips/{pretrip_id}/tap-point
+     */
+    public function tapPoint($pretripId, TapPointRequest $request): JsonResponse
+    {
+        $pretrip = Pretrip::findOrFail($pretripId);
+
+        // Cek apakah titik ini sudah pernah di-tap
+        $existingTap = PretripTap::where('pretrip_id', $pretripId)
+            ->where('rfid_point_id', $request->rfid_point_id)
+            ->first();
+
+        if ($existingTap) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Titik ini sudah pernah di-tap',
+                'data' => [
+                    'existing_tap' => [
+                        'id' => $existingTap->id,
+                        'tapped_at' => $existingTap->tapped_at,
+                        'tap_sequence' => $existingTap->tap_sequence,
+                    ],
+                ],
+            ], 422);
+        }
+
+        // Hitung tap sequence berikutnya
+        $nextSequence = $pretrip->taps()->count() + 1;
+
+        // Create tap baru
+        $tap = PretripTap::create([
+            'pretrip_id' => $pretripId,
+            'rfid_point_id' => $request->rfid_point_id,
+            'tapped_at' => $request->tapped_at ?? now(),
+            'tap_sequence' => $nextSequence,
+        ]);
+
+        // Update status pretrip
+        $pretrip->refresh();
+        $pretrip->updateStatus();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Point tapped successfully',
+            'data' => [
+                'tap' => [
+                    'id' => $tap->id,
+                    'rfid_point_id' => $tap->rfid_point_id,
+                    'tapped_at' => $tap->tapped_at,
+                    'tap_sequence' => $tap->tap_sequence,
+                ],
+                'pretrip' => [
+                    'id' => $pretrip->id,
+                    'status' => $pretrip->status,
+                    'completion_percentage' => $pretrip->completion_percentage,
+                    'remaining_points' => $pretrip->remaining_points,
+                    'is_complete' => $pretrip->isComplete(),
+                ],
+            ],
+        ], 201);
+    }
+
+    /**
+     * Tap menggunakan RFID code (auto-detect point)
+     * POST /api/pretrips/{pretrip_id}/tap-rfid
+     */
+    public function tapRfid($pretripId, Request $request): JsonResponse
+    {
+        $request->validate([
+            'rfid_code' => 'required|string|exists:rfid_points,rfid_code',
+            'tapped_at' => 'nullable|date',
+        ]);
+
+        $pretrip = Pretrip::findOrFail($pretripId);
+
+        // Cari RFID point berdasarkan code
+        $rfidPoint = RfidPoint::where('rfid_code', $request->rfid_code)
+            ->where('truck_id', $pretrip->truck_id)
+            ->firstOrFail();
+
+        // Cek apakah titik ini sudah pernah di-tap
+        $existingTap = PretripTap::where('pretrip_id', $pretripId)
+            ->where('rfid_point_id', $rfidPoint->id)
+            ->first();
+
+        if ($existingTap) {
+            return response()->json([
+                'success' => false,
+                'message' => 'RFID ini sudah pernah di-tap',
+                'data' => [
+                    'rfid_code' => $request->rfid_code,
+                    'location' => $rfidPoint->location,
+                    'existing_tap' => [
+                        'id' => $existingTap->id,
+                        'tapped_at' => $existingTap->tapped_at,
+                        'tap_sequence' => $existingTap->tap_sequence,
+                    ],
+                ],
+            ], 422);
+        }
+
+        // Hitung tap sequence berikutnya
+        $nextSequence = $pretrip->taps()->count() + 1;
+
+        // Create tap baru
+        $tap = PretripTap::create([
+            'pretrip_id' => $pretripId,
+            'rfid_point_id' => $rfidPoint->id,
+            'tapped_at' => $request->tapped_at ?? now(),
+            'tap_sequence' => $nextSequence,
+        ]);
+
+        // Update status pretrip
+        $pretrip->refresh();
+        $pretrip->updateStatus();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'RFID tapped successfully',
+            'data' => [
+                'tap' => [
+                    'id' => $tap->id,
+                    'rfid_code' => $rfidPoint->rfid_code,
+                    'location' => $rfidPoint->location,
+                    'point_number' => $rfidPoint->point_number,
+                    'tapped_at' => $tap->tapped_at,
+                    'tap_sequence' => $tap->tap_sequence,
+                ],
+                'pretrip' => [
+                    'id' => $pretrip->id,
+                    'status' => $pretrip->status,
+                    'completion_percentage' => $pretrip->completion_percentage,
+                    'remaining_points' => $pretrip->remaining_points,
+                    'is_complete' => $pretrip->isComplete(),
+                ],
+            ],
+        ], 201);
+    }
+
+    /**
+     * Create pretrip lengkap dengan semua taps sekaligus
+     * POST /api/pretrips/complete
+     */
+    public function completePretrip(CompletePretripRequest $request): JsonResponse
+    {
+        // Create pretrip header
+        $pretrip = Pretrip::create([
+            'truck_id' => $request->truck_id,
+            'driver_id' => $request->driver_id,
+            'trip_date' => $request->trip_date ?? today(),
+            'start_time' => $request->start_time ?? now(),
+            'status' => 'in_progress',
+            'notes' => $request->notes,
+        ]);
+
+        // Create all taps
+        $taps = [];
+        foreach ($request->taps as $index => $tapData) {
+            $tap = PretripTap::create([
+                'pretrip_id' => $pretrip->id,
+                'rfid_point_id' => $tapData['rfid_point_id'],
+                'tapped_at' => $tapData['tapped_at'] ?? now(),
+                'tap_sequence' => $index + 1,
+            ]);
+            $taps[] = $tap;
+        }
+
+        // Update status pretrip
+        $pretrip->refresh();
+        $pretrip->updateStatus();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'PreTrip completed successfully',
+            'data' => new PretripApiResource($pretrip->load(['taps.rfidPoint', 'truck', 'driver'])),
+        ], 201);
+    }
+
+    /**
+     * Get detail pretrip
+     * GET /api/pretrips/{pretrip_id}
+     */
+    public function show($pretripId): JsonResponse
+    {
+        $pretrip = Pretrip::with(['taps.rfidPoint', 'truck', 'driver'])
+            ->findOrFail($pretripId);
+
+        return response()->json([
+            'success' => true,
+            'data' => new PretripApiResource($pretrip),
+        ]);
+    }
+
+    /**
+     * Get pretrip hari ini untuk truck tertentu
+     * GET /api/trucks/{truck_id}/today-pretrip
+     */
+    public function getTodayPretrip($truckId): JsonResponse
+    {
+        $pretrip = Pretrip::where('truck_id', $truckId)
+            ->whereDate('trip_date', today())
+            ->with(['taps.rfidPoint', 'truck', 'driver'])
+            ->latest()
+            ->first();
+
+        if (!$pretrip) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No pretrip found for today',
+                'data' => null,
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => new PretripApiResource($pretrip),
+        ]);
+    }
+
+    /**
+     * Complete pretrip (force set to completed/incomplete)
+     * POST /api/pretrips/{pretrip_id}/complete
+     */
+    public function markComplete($pretripId): JsonResponse
+    {
+        $pretrip = Pretrip::findOrFail($pretripId);
+
+        // Tentukan status berdasarkan kelengkapan
+        $status = $pretrip->isComplete() ? 'completed' : 'incomplete';
+
+        $pretrip->update([
+            'status' => $status,
+            'end_time' => now(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => "PreTrip marked as {$status}",
+            'data' => new PretripApiResource($pretrip->load(['taps.rfidPoint', 'truck', 'driver'])),
+        ]);
+    }
+}

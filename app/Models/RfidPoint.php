@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class RfidPoint extends Model
@@ -33,6 +34,14 @@ class RfidPoint extends Model
     }
 
     /**
+     * Get all pretrip taps for this RFID point
+     */
+    public function pretripTaps(): HasMany
+    {
+        return $this->hasMany(PretripTap::class);
+    }
+
+    /**
      * Scope untuk filter RFID point yang aktif
      */
     public function scopeActive($query)
@@ -40,9 +49,6 @@ class RfidPoint extends Model
         return $query->where('is_active', true);
     }
 
-    /**
-     * Scope untuk filter RFID point yang tidak aktif
-     */
     public function scopeInactive($query)
     {
         return $query->where('is_active', false);
