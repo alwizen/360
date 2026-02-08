@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Pretrips;
 
 use App\Filament\Resources\Pretrips\Pages\ManagePretrips;
 use App\Models\Pretrip;
+use App\Models\PretripTap;
 use App\Models\Truck;
 use BackedEnum;
 use Filament\Actions\BulkActionGroup;
@@ -49,7 +50,6 @@ class PretripResource extends Resource
     {
         return $schema
             ->components([
-                // Pilih Truck
                 Select::make('truck_id')
                     ->label('Pilih Truck')
                     ->relationship('truck', 'truck_id')
@@ -58,30 +58,35 @@ class PretripResource extends Resource
                     ->required()
                     ->columnSpanFull()
                     ->live()
-                    ->afterStateUpdated(function (Set $set, $state) {
-                        // Reset taps ketika ganti truck
-                        $set('taps_data', []);
-
-                        // Auto-generate field untuk setiap titik RFID
-                        if ($state) {
-                            $truck = Truck::find($state);
-                            if ($truck) {
-                                $rfidPoints = $truck->activeRfidPoints()
-                                    ->orderBy('point_number')
-                                    ->get();
-
-                                $tapsData = [];
-                                foreach ($rfidPoints as $index => $point) {
-                                    $tapsData[] = [
-                                        'rfid_point_id' => $point->id,
-                                        'point_label' => "Point {$point->point_number} - {$point->location}",
-                                        'tapped_at' => now(),
-                                        'tap_sequence' => $index + 1,
-                                    ];
-                                }
-                                $set('taps_data', $tapsData);
-                            }
+                    ->afterStateUpdated(function (Set $set, $state, Get $get) {
+                        if (!$state) {
+                            $set('taps', []);
+                            return;
                         }
+
+                        $truck = Truck::find($state);
+                        if (!$truck) {
+                            return;
+                        }
+
+                        // Get existing taps count untuk avoid overwrite saat edit
+                        $existingTaps = [];
+
+                        $rfidPoints = $truck->activeRfidPoints()
+                            ->orderBy('point_number')
+                            ->get();
+
+                        $rows = [];
+                        foreach ($rfidPoints as $index => $point) {
+                            $rows[] = [
+                                'rfid_point_id' => $point->id,
+                                'tap_sequence' => $index + 1,
+                                'tapped_at' => now(),
+                                'point_info' => "Point {$point->point_number} - {$point->location}",
+                            ];
+                        }
+
+                        $set('taps', $rows);
                     })
                     ->helperText(fn(Get $get) => self::getTruckInfo($get('truck_id'))),
 
@@ -91,52 +96,88 @@ class PretripResource extends Resource
                     ->default(today())
                     ->native(false),
 
-                // Select::make('driver_id')
-                //     ->label('Driver')
-                //     ->relationship('driver', 'name')
-                //     ->searchable()
-                //     ->preload()
-                //     ->nullable()
-                //     ->helperText('Opsional'),
-
                 TimePicker::make('start_time')
                     ->label('Waktu Mulai')
                     ->default(now())
                     ->seconds(false),
 
-                // Field Dinamis untuk Tap setiap Titik
-                Repeater::make('taps_data')
+                // REPEATER DENGAN RELATIONSHIP
+                Repeater::make('taps')
                     ->label('Tap Setiap Titik RFID')
+                    ->relationship('taps')  // <<< INI PENTING
                     ->schema([
-                        Hidden::make('rfid_point_id'),
-                        Hidden::make('tap_sequence'),
-
-                        TextInput::make('point_label')
-                            ->label('Titik')
+                        // JANGAN pakai Hidden! Pakai Select dengan disabled
+                        Select::make('rfid_point_id')
+                            ->label('Titik RFID')
+                            ->required()
                             ->disabled()
-                            ->dehydrated(false)
-                            ->columnSpan(1),
+                            ->dehydrated(true)  // <<< WAJIB!
+                            ->options(function (Get $get, $record) {
+                                // Saat create: ambil dari parent truck_id
+                                // Saat edit: ambil dari existing record
+                                $truckId = $get('../../truck_id');
+
+                                if (!$truckId) {
+                                    return [];
+                                }
+
+                                return \App\Models\RfidPoint::where('truck_id', $truckId)
+                                    ->where('is_active', true)
+                                    ->orderBy('point_number')
+                                    ->get()
+                                    ->mapWithKeys(function ($point) {
+                                        return [$point->id => "Point {$point->point_number} - {$point->location}"];
+                                    });
+                            }),
+
+                        TextInput::make('tap_sequence')
+                            ->label('Urutan')
+                            ->required()
+                            ->numeric()
+                            ->disabled()
+                            ->dehydrated(true),  // <<< WAJIB!
 
                         TimePicker::make('tapped_at')
-                            ->label('Tapped At')
+                            ->label('Waktu Tap')
                             ->required()
                             ->seconds(true)
-                            ->columnSpan(1),
+                            ->native(false),
                     ])
-                    ->columns(2)
-                    ->visible(fn(Get $get) => !empty($get('taps_data')))
+                    ->columns(3)
                     ->addable(false)
                     ->deletable(false)
                     ->reorderable(false)
                     ->defaultItems(0)
-                    ->columnSpanFull(),
+                    ->columnSpanFull()
+                    ->saveRelationshipsUsing(function ($component, $state, $record) {
+                        // CUSTOM SAVE LOGIC
+                        if (!$record || !is_array($state)) {
+                            return;
+                        }
+
+                        // Hapus taps lama
+                        $record->taps()->delete();
+
+                        // Insert taps baru
+                        foreach ($state as $item) {
+                            if (isset($item['rfid_point_id'], $item['tap_sequence'], $item['tapped_at'])) {
+                                PretripTap::create([
+                                    'pretrip_id' => $record->id,
+                                    'rfid_point_id' => $item['rfid_point_id'],
+                                    'tap_sequence' => $item['tap_sequence'],
+                                    'tapped_at' => $item['tapped_at'],
+                                ]);
+                            }
+                        }
+
+                        // Update status
+                        $record->updateStatus();
+                    }),
 
                 Textarea::make('notes')
                     ->label('Catatan')
                     ->rows(3)
                     ->columnSpanFull(),
-
-
             ]);
     }
 
@@ -226,29 +267,20 @@ class PretripResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(function ($query) {
+                return $query->with(['truck', 'taps.rfidPoint']);
+            })
             ->columns([
                 TextColumn::make('truck.truck_id')
-                    ->label('Truck ID')
+                    ->label('Nopol')
                     ->searchable()
                     ->sortable(),
-                TextColumn::make('driver.name')
-                    ->label('Driver')
-                    ->searchable()
-                    ->placeholder('-')
-                    ->toggleable(),
+
                 TextColumn::make('trip_date')
                     ->label('Tanggal')
                     ->date('d M Y')
                     ->sortable(),
-                TextColumn::make('start_time')
-                    ->label('Mulai')
-                    ->time('H:i')
-                    ->placeholder('-'),
-                TextColumn::make('end_time')
-                    ->label('Selesai')
-                    ->time('H:i')
-                    ->placeholder('-')
-                    ->toggleable(isToggledHiddenByDefault: true),
+
                 TextColumn::make('status')
                     ->label('Status')
                     ->badge()
@@ -264,25 +296,76 @@ class PretripResource extends Resource
                         'incomplete' => 'Incomplete',
                         default => $state,
                     }),
-                TextColumn::make('taps_count')
-                    ->label('Taps')
-                    ->counts('taps')
-                    ->badge()
-                    ->color('info'),
+
+                // TAP 1
+                TextColumn::make('tap1_location')
+                    ->label('Lokasi Tap 1')
+                    ->getStateUsing(fn($record) => $record->taps->where('tap_sequence', 1)->first()?->rfidPoint?->location ?? '-'),
+
+                TextColumn::make('tap1_time')
+                    ->label('Jam Tap 1')
+                    ->getStateUsing(function ($record) {
+                        $tap = $record->taps->where('tap_sequence', 1)->first();
+                        return $tap?->tapped_at ? $tap->tapped_at->format('H:i:s') : '-';
+                    }),
+
+                // TAP 2
+                TextColumn::make('tap2_location')
+                    ->label('Lokasi Tap 2')
+                    ->getStateUsing(fn($record) => $record->taps->where('tap_sequence', 2)->first()?->rfidPoint?->location ?? '-'),
+
+                TextColumn::make('tap2_time')
+                    ->label('Jam Tap 2')
+                    ->getStateUsing(function ($record) {
+                        $tap = $record->taps->where('tap_sequence', 2)->first();
+                        return $tap?->tapped_at ? $tap->tapped_at->format('H:i:s') : '-';
+                    }),
+
+                // TAP 3
+                TextColumn::make('tap3_location')
+                    ->label('Lokasi Tap 3')
+                    ->getStateUsing(fn($record) => $record->taps->where('tap_sequence', 3)->first()?->rfidPoint?->location ?? '-')
+                    ->toggleable(),
+
+                TextColumn::make('tap3_time')
+                    ->label('Jam Tap 3')
+                    ->getStateUsing(function ($record) {
+                        $tap = $record->taps->where('tap_sequence', 3)->first();
+                        return $tap?->tapped_at ? $tap->tapped_at->format('H:i:s') : '-';
+                    })
+                    ->toggleable(),
+
+                // TAP 4
+                TextColumn::make('tap4_location')
+                    ->label('Lokasi Tap 4')
+                    ->getStateUsing(fn($record) => $record->taps->where('tap_sequence', 4)->first()?->rfidPoint?->location ?? '-'),
+
+                TextColumn::make('tap4_time')
+                    ->label('Jam Tap 4')
+                    ->getStateUsing(function ($record) {
+                        $tap = $record->taps->where('tap_sequence', 4)->first();
+                        return $tap?->tapped_at ? $tap->tapped_at->format('H:i:s') : '-';
+                    }),
+
+                // TAP 5
+                TextColumn::make('tap5_location')
+                    ->label('Lokasi Tap 5')
+                    ->getStateUsing(fn($record) => $record->taps->where('tap_sequence', 5)->first()?->rfidPoint?->location ?? '-'),
+
+                TextColumn::make('tap5_time')
+                    ->label('Jam Tap 5')
+                    ->getStateUsing(function ($record) {
+                        $tap = $record->taps->where('tap_sequence', 5)->first();
+                        return $tap?->tapped_at ? $tap->tapped_at->format('H:i:s') : '-';
+                    }),
+
                 TextColumn::make('completion_percentage')
                     ->label('Progress')
                     ->suffix('%')
                     ->badge()
                     ->color(fn(float $state): string => $state >= 100 ? 'success' : 'warning'),
+
                 TextColumn::make('created_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('updated_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('deleted_at')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
@@ -310,7 +393,7 @@ class PretripResource extends Resource
                 ForceDeleteAction::make(),
                 RestoreAction::make(),
             ])
-            ->toolbarActions([
+            ->bulkActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                     ForceDeleteBulkAction::make(),
@@ -319,7 +402,6 @@ class PretripResource extends Resource
             ])
             ->defaultSort('trip_date', 'desc');
     }
-
     /**
      * Get truck info untuk helper text
      */

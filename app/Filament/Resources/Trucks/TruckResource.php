@@ -14,6 +14,7 @@ use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Resource;
@@ -29,15 +30,30 @@ class TruckResource extends Resource
 {
     protected static ?string $model = Truck::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTruck;
+
+    protected static ?string $navigationLabel = "Mobil Tangki";
+
+    protected static ?string $label = "Mobil Tangki";
 
     public static function form(Schema $schema): Schema
     {
         return $schema
             ->components([
                 TextInput::make('truck_id')
-                    ->required(),
-                TextInput::make('capacity')
+                    ->required()
+                    ->unique(ignoreRecord: true)
+                    ->label('Nopol'),
+                Select::make('capacity')
+                    ->label('Kapasitas')
+                    ->options([
+                        4 => '4 Kl',
+                        5 => '5 Kl',
+                        8 => '8 Kl',
+                        16 => '16 Kl',
+                        24 => '24 Kl',
+                        32 => '32 Kl',
+                    ])
                     ->required(),
                 TextInput::make('merk')
                     ->required(),
@@ -63,7 +79,7 @@ class TruckResource extends Resource
                     ->placeholder('-'),
                 TextEntry::make('deleted_at')
                     ->dateTime()
-                    ->visible(fn (Truck $record): bool => $record->trashed()),
+                    ->visible(fn(Truck $record): bool => $record->trashed()),
             ]);
     }
 
@@ -72,13 +88,20 @@ class TruckResource extends Resource
         return $table
             ->columns([
                 TextColumn::make('truck_id')
-                    ->searchable(),
+                    ->searchable()
+                    ->label('Nopol'),
                 TextColumn::make('capacity')
-                    ->searchable(),
+                    ->suffix(' KL')
+                    ->label('Kapasaitas'),
                 TextColumn::make('merk')
                     ->searchable(),
                 TextColumn::make('status')
-                    ->searchable(),
+                    ->badge()
+                    ->color(fn(string $state): string => match ($state) {
+                        'maintenance' => 'warning',
+                        'available' => 'success',
+                        'afkir' => 'danger',
+                    })->searchable(),
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()

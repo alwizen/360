@@ -23,6 +23,19 @@ class PretripTap extends Model
         'tap_sequence' => 'integer',
     ];
 
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::creating(function ($model) {
+            \Log::info('PretripTap Creating', $model->toArray());
+        });
+
+        static::created(function ($model) {
+            \Log::info('PretripTap Created', ['id' => $model->id]);
+        });
+    }
+
     /**
      * Get the pretrip for this tap
      */

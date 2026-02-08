@@ -85,11 +85,16 @@ class RfidPointResource extends Resource
                 Repeater::make('points')
                     ->label('Detail Titik RFID')
                     ->schema([
-                        TextInput::make('location')
+                        Select::make('location')
                             ->label('Lokasi Titik')
                             ->required()
-                            ->maxLength(255)
-                            ->placeholder('Contoh: Depan Kiri, Belakang Kanan, Atas')
+                            ->options([
+                                'Mainhole' => 'Mainhole',
+                                'Depan Kiri' => 'Depan Kiri',
+                                'Depan Kanan' => 'Depan Kanan',
+                                'Tengah Kiri' => 'Tengah Kiri',
+                                'Tengah Kanan' => 'Tengah Kanan',
+                            ])
                             ->columnSpan(1),
 
                         TextInput::make('rfid_code')

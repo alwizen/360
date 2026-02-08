@@ -37,14 +37,6 @@ class Pretrip extends Model
     }
 
     /**
-     * Get the driver for this pretrip
-     */
-    public function driver(): BelongsTo
-    {
-        return $this->belongsTo(User::class, 'driver_id');
-    }
-
-    /**
      * Get all taps for this pretrip
      */
     public function taps(): HasMany

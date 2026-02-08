@@ -5,97 +5,66 @@ namespace Database\Seeders;
 use App\Models\Truck;
 use App\Models\RfidPoint;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Str;
 
 class TruckSeeder extends Seeder
 {
     /**
-     * Run the database seeds.
+     * Generate NOPOL Indonesia tanpa spasi (B1234ABC) UNIQUE
      */
+    private function generateNopol(array &$used): string
+    {
+        do {
+            $prefix = collect(['B', 'D', 'F', 'E', 'Z', 'T', 'A'])->random();
+            $number = rand(1000, 9999);
+            $suffix = Str::upper(Str::random(rand(2, 3)));
+
+            $nopol = $prefix . $number . $suffix;
+        } while (in_array($nopol, $used));
+
+        $used[] = $nopol;
+        return $nopol;
+    }
+
     public function run(): void
     {
-        // Sample Trucks
-        $trucks = [
-            [
-                'truck_id' => 'MT-001',
-                'capacity' => '4',
-                'merk' => 'Hino',
-                'status' => 'available',
-                'rfid_points' => [
-                    ['location' => 'Depan Kiri', 'rfid_code' => 'RFID-001-01'],
-                    ['location' => 'Belakang Kanan', 'rfid_code' => 'RFID-001-02'],
-                ]
-            ],
-            [
-                'truck_id' => 'MT-002',
-                'capacity' => '8',
-                'merk' => 'Mitsubishi',
-                'status' => 'available',
-                'rfid_points' => [
-                    ['location' => 'Depan Kiri', 'rfid_code' => 'RFID-002-01'],
-                    ['location' => 'Depan Kanan', 'rfid_code' => 'RFID-002-02'],
-                    ['location' => 'Belakang Tengah', 'rfid_code' => 'RFID-002-03'],
-                ]
-            ],
-            [
-                'truck_id' => 'MT-003',
-                'capacity' => '16',
-                'merk' => 'Isuzu',
-                'status' => 'available',
-                'rfid_points' => [
-                    ['location' => 'Depan Kiri', 'rfid_code' => 'RFID-003-01'],
-                    ['location' => 'Depan Kanan', 'rfid_code' => 'RFID-003-02'],
-                ]
-            ],
-            [
-                'truck_id' => 'MT-004',
-                'capacity' => '24',
-                'merk' => 'Hino',
-                'status' => 'maintenance',
-                'rfid_points' => [
-                    ['location' => 'Depan Kiri', 'rfid_code' => 'RFID-004-01'],
-                    ['location' => 'Depan Kanan', 'rfid_code' => 'RFID-004-02'],
-                    ['location' => 'Tengah Kiri', 'rfid_code' => 'RFID-004-03'],
-                    ['location' => 'Tengah Kanan', 'rfid_code' => 'RFID-004-04'],
-                    ['location' => 'Belakang Atas', 'rfid_code' => 'RFID-004-05'],
-                ]
-            ],
-            [
-                'truck_id' => 'MT-005',
-                'capacity' => '32',
-                'merk' => 'Mitsubishi',
-                'status' => 'available',
-                'rfid_points' => [
-                    ['location' => 'Depan Kiri', 'rfid_code' => 'RFID-005-01'],
-                    ['location' => 'Depan Kanan', 'rfid_code' => 'RFID-005-02'],
-                    ['location' => 'Tengah Kiri', 'rfid_code' => 'RFID-005-03'],
-                ]
-            ],
-            [
-                'truck_id' => 'MT-006',
-                'capacity' => '5',
-                'merk' => 'Hino',
-                'status' => 'afkir',
-                'rfid_points' => []
-            ],
+        $usedNopol = [];
+
+        $locations = [
+            'Mainhole',
+            'Depan Kiri',
+            'Depan Kanan',
+            'Tengah Kiri',
+            'Tengah Kanan',
         ];
 
-        foreach ($trucks as $truckData) {
-            $rfidPoints = $truckData['rfid_points'];
-            unset($truckData['rfid_points']);
+        for ($i = 1; $i <= 15; $i++) {
 
-            $truck = Truck::create($truckData);
+            $truck = Truck::create([
+                'truck_id' => $this->generateNopol($usedNopol),
+                'capacity' => collect(['4', '5', '8', '16', '24', '32'])->random(),
+                'merk' => collect(['Hino', 'Mitsubishi', 'Isuzu'])->random(),
+                'status' => collect([
+                    'available',
+                    'available',
+                    'available',
+                    'maintenance',
+                    'afkir'
+                ])->random(),
+            ]);
 
-            foreach ($rfidPoints as $index => $point) {
+            // ==== Create RFID Points ====
+            foreach ($locations as $index => $location) {
                 RfidPoint::create([
                     'truck_id' => $truck->id,
-                    'rfid_code' => $point['rfid_code'],
-                    'location' => $point['location'],
+                    'rfid_code' => 'RFID-' . $truck->id . '-' . str_pad($index + 1, 2, '0', STR_PAD_LEFT),
+                    'location' => $location,
                     'point_number' => $index + 1,
                     'is_active' => true,
                 ]);
             }
         }
 
-        $this->command->info('Trucks and RFID Points seeded successfully!');
+        $this->command->info('15 Trucks + RFID Points seeded successfully!');
     }
 }
