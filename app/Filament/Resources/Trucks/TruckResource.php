@@ -47,18 +47,23 @@ class TruckResource extends Resource
                 Select::make('capacity')
                     ->label('Kapasitas')
                     ->options([
-                        4 => '4 Kl',
-                        5 => '5 Kl',
-                        8 => '8 Kl',
-                        16 => '16 Kl',
-                        24 => '24 Kl',
-                        32 => '32 Kl',
+                        '4' => '4 Kl',
+                        '5' => '5 Kl',
+                        '8' => '8 Kl',
+                        '16' => '16 Kl',
+                        '24' => '24 Kl',
+                        '32' => '32 Kl',
                     ])
                     ->required(),
                 TextInput::make('merk')
                     ->required(),
-                TextInput::make('status')
+                Select::make('status')
                     ->required()
+                    ->options([
+                        'maintenance' => 'maintenance',
+                        'available' => 'available',
+                        'afkir' => 'afkir',
+                    ])
                     ->default('available'),
             ]);
     }
@@ -88,8 +93,22 @@ class TruckResource extends Resource
         return $table
             ->columns([
                 TextColumn::make('truck_id')
-                    ->searchable()
-                    ->label('Nopol'),
+                    ->label('Nopol')
+                    // ->formatStateUsing(function ($state) {
+
+                    //     $state = strtoupper(str_replace(' ', '', $state));
+
+                    //     preg_match('/^([A-Z]+)([0-9]+)([A-Z]{1,4})?$/', $state, $matches);
+
+                    //     if (!$matches) return $state;
+
+                    //     $depan  = $matches[1] ?? '';
+                    //     $angka  = $matches[2] ?? '';
+                    //     $belakang = $matches[3] ?? '';
+
+                    //     return trim("$depan $angka $belakang");
+                    // })
+                    ->searchable(),
                 TextColumn::make('capacity')
                     ->suffix(' KL')
                     ->label('Kapasaitas'),

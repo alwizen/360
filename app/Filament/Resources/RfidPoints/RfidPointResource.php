@@ -29,6 +29,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -89,11 +90,11 @@ class RfidPointResource extends Resource
                             ->label('Lokasi Titik')
                             ->required()
                             ->options([
-                                'Mainhole' => 'Mainhole',
-                                'Depan Kiri' => 'Depan Kiri',
-                                'Depan Kanan' => 'Depan Kanan',
-                                'Tengah Kiri' => 'Tengah Kiri',
-                                'Tengah Kanan' => 'Tengah Kanan',
+                                'kompartemen1' => 'Kompartemen 1',
+                                'kompartemen2' => 'Kompartemen 2',
+                                'kompartemen3' => 'Kompartemen 3',
+                                'kompartemen4' => 'Kompartemen 4',
+                                'kompartemen5' => 'Kompartemen 5',
                             ])
                             ->columnSpan(1),
 
@@ -144,7 +145,7 @@ class RfidPointResource extends Resource
         return $table
             ->columns([
                 TextColumn::make('truck.truck_id')
-                    ->label('Truck ID')
+                    ->label('Nopol')
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('point_number')
@@ -176,6 +177,11 @@ class RfidPointResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
+                SelectFilter::make('truck_id')
+                    ->label('Pilih Truck')
+                    ->relationship('truck', 'truck_id')
+                    ->searchable()
+                    ->preload(),
                 TrashedFilter::make(),
             ])
             ->recordActions([

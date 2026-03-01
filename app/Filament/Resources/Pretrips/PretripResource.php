@@ -44,7 +44,10 @@ class PretripResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentCheck;
 
-    protected static ?string $navigationLabel = 'PreTrip Inspection';
+    protected static ?string $navigationLabel = 'Checking Comparement MT';
+
+
+    protected static ?string $label = 'Checking Comparement MT';
 
     public static function form(Schema $schema): Schema
     {
@@ -101,26 +104,20 @@ class PretripResource extends Resource
                     ->default(now())
                     ->seconds(false),
 
-                // REPEATER DENGAN RELATIONSHIP
                 Repeater::make('taps')
                     ->label('Tap Setiap Titik RFID')
-                    ->relationship('taps')  // <<< INI PENTING
+                    ->relationship('taps')
                     ->schema([
-                        // JANGAN pakai Hidden! Pakai Select dengan disabled
                         Select::make('rfid_point_id')
                             ->label('Titik RFID')
                             ->required()
                             ->disabled()
-                            ->dehydrated(true)  // <<< WAJIB!
+                            ->dehydrated(true)
                             ->options(function (Get $get, $record) {
-                                // Saat create: ambil dari parent truck_id
-                                // Saat edit: ambil dari existing record
                                 $truckId = $get('../../truck_id');
-
                                 if (!$truckId) {
                                     return [];
                                 }
-
                                 return \App\Models\RfidPoint::where('truck_id', $truckId)
                                     ->where('is_active', true)
                                     ->orderBy('point_number')
@@ -135,7 +132,7 @@ class PretripResource extends Resource
                             ->required()
                             ->numeric()
                             ->disabled()
-                            ->dehydrated(true),  // <<< WAJIB!
+                            ->dehydrated(true),
 
                         TimePicker::make('tapped_at')
                             ->label('Waktu Tap')
@@ -150,15 +147,15 @@ class PretripResource extends Resource
                     ->defaultItems(0)
                     ->columnSpanFull()
                     ->saveRelationshipsUsing(function ($component, $state, $record) {
-                        // CUSTOM SAVE LOGIC
+
                         if (!$record || !is_array($state)) {
                             return;
                         }
 
-                        // Hapus taps lama
+
                         $record->taps()->delete();
 
-                        // Insert taps baru
+
                         foreach ($state as $item) {
                             if (isset($item['rfid_point_id'], $item['tap_sequence'], $item['tapped_at'])) {
                                 PretripTap::create([

@@ -22,6 +22,7 @@ class Truck extends Model
         'capacity' => 'integer',
     ];
 
+
     /**
      * Get all RFID points for this truck
      */
